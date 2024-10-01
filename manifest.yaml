@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-app
+spec:
+  replicas: 3 # Нам нужно 3 пода для стабильной работы приложения
+  selector:
+    matchLabels:
+      app: web-app
+  template:
+    metadata:
+      labels:
+        app: web-app
+    spec:
+      containers:
+      - name: web-container
+        image: your-app-image:latest # Образ вашего приложения
+        resources:
+          requests:
+            memory: "128Mi" # Запрос на память, так как это постоянная нагрузка
+            cpu: "0.5"      # В первые секунды приложению нужно больше CPU
+          limits:
+            memory: "256Mi" # Ограничиваем максимальную память
+            cpu: "1"        # Ограничиваем максимальный CPU, чтобы избежать излишнего потребления
+        ports:
+        - containerPort: 80 # Порт, на котором работает приложение
+        readinessProbe: # Готовность пода принимать запросы после инициализации
+          httpGet:
+            path: /healthz # Предположим, что у приложения есть health-check эндпоинт
+            port: 80
+          initialDelaySeconds: 10 # Ожидание перед началом проверок, так как нужно время для инициализации
+          periodSeconds: 5 # Частота проверок состояния готовности
+        livenessProbe: # Также добавим проверку на живучесть пода
+          httpGet:
+            path: /healthz
+            port: 80
+          initialDelaySeconds: 30 # Начинаем проверять через 30 секунд
+          periodSeconds: 10       # Проверяем каждые 10 секунд
+        lifecycle: # Завершаем запросы корректно при выключении пода
+          preStop:
+            exec:
+              command: ["/bin/sh", "-c", "sleep 5"] # Даём время завершить текущие запросы
+
+      affinity:
+        podAntiAffinity: # Антиаффинити, чтобы поды не располагались на одной ноде
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values:
+                    - web-app
+              topologyKey: "kubernetes.io/hostname" # Гарантируем распределение по нодам
+
+      terminationGracePeriodSeconds: 30 # Устанавливаем грациозный период завершения для корректного завершения работы пода
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-service
+spec:
+  selector:
+    app: web-app
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80
+  type: ClusterIP # Сервис внутри кластера для балансировки между подами
